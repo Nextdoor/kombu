@@ -21,4 +21,4 @@ Django
 django-kombu
 
 # SQS transport
-boto
+boto>=2.22.0

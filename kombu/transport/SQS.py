@@ -76,8 +76,6 @@ def maybe_int(x):
         return int(x)
     except ValueError:
         return x
-BOTO_VERSION = tuple(maybe_int(part) for part in boto.__version__.split('.'))
-W_LONG_POLLING = BOTO_VERSION >= (2, 8)
 
 #: SQS bulk get supports a maximum of 10 messages at a time.
 SQS_MAX_MESSAGES = 10
@@ -336,7 +334,7 @@ class Channel(virtual.Channel):
 
         """
         q = self._new_queue(queue)
-        if W_LONG_POLLING and queue not in self._fanout_queues:
+        if queue not in self._fanout_queues:
             return q.get_messages(
                 count, wait_time_seconds=self.wait_time_seconds,
             )
