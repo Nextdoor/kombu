@@ -7,6 +7,9 @@ slightly.
 
 from __future__ import absolute_import
 
+import random
+import string
+
 from kombu import Connection
 from kombu import messaging
 from kombu import five
@@ -14,6 +17,7 @@ from kombu.tests.case import Case, SkipTest
 import kombu
 
 try:
+    from boto.sqs import message, bigmessage
     from kombu.transport import SQS
 except ImportError:
     # Boto must not be installed if the SQS transport fails to import,
@@ -142,6 +146,50 @@ class test_Channel(Case):
     def test_init(self):
         """kombu.SQS.Channel instantiates correctly with mocked queues"""
         self.assertIn(self.queue_name, self.channel._queue_cache)
+
+    def test_create_sqs_message_object(self):
+        # If the message size is < 256kb, we should get a normal Message()
+        # object back with no special setup required. No
+        data = ''.join(random.choice(string.ascii_uppercase) for i in range(255*1024))
+        retval = self.channel._create_sqs_message_object(data)
+        self.assertEquals(type(retval), message.Message)
+
+        # If the message size is < 256kb, we should get a normal Message()
+        # object back with no special setup required.
+        #
+        # Same as above test, but we're going to pass in S3 bucket options
+        self.channel.s3_bucket = 's3://unittest'
+        data = ''.join(random.choice(string.ascii_uppercase) for i in range(255*1024))
+        retval = self.channel._create_sqs_message_object(data)
+        self.assertEquals(type(retval), message.Message)
+
+        # If the message size is > 256kb, but there is no s3_bucket defined, we
+        # should get a standard Message() object back.
+        #
+        # Same as above test, but we're going to pass in S3 bucket options
+        self.channel.s3_bucket = None
+        data = ''.join(random.choice(string.ascii_uppercase) for i in range(257*1024))
+        retval = self.channel._create_sqs_message_object(data)
+        self.assertEquals(type(retval), message.Message)
+
+        # If the message size is > 256kb, we should get a BigMessage()
+        # object back with no special setup required.
+        #
+        # Same as above test, but we're going to pass in S3 bucket options
+        self.channel.s3_bucket = 's3://unittest'
+        data = ''.join(random.choice(string.ascii_uppercase) for i in range(257*1024))
+        retval = self.channel._create_sqs_message_object(data)
+        self.assertEquals(type(retval), bigmessage.BigMessage)
+
+        # Override the max-message size to something smaller and see if that
+        # triggers object back with no special setup required.
+        #
+        # Same as above test, but we're going to pass in S3 bucket options
+        self.channel.s3_bucket = 's3://unittest'
+        self.channel.s3_message_limit = 64 * 1024
+        data = ''.join(random.choice(string.ascii_uppercase) for i in range(65*1024))
+        retval = self.channel._create_sqs_message_object(data)
+        self.assertEquals(type(retval), bigmessage.BigMessage)
 
     def test_new_queue(self):
         queue_name = "new_unittest_queue"

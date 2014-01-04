@@ -39,6 +39,7 @@ SQS Features supported by this transport:
 
 from __future__ import absolute_import
 
+from cStringIO import StringIO
 import collections
 import socket
 import string
@@ -53,6 +54,7 @@ from boto.sdb.domain import Domain
 from boto.sdb.connection import SDBConnection
 from boto.sqs.connection import SQSConnection
 from boto.sqs.message import Message
+from boto.sqs.bigmessage import BigMessage
 
 from kombu.five import Empty, range, text_t
 from kombu.log import get_logger
@@ -169,6 +171,8 @@ class Channel(virtual.Channel):
     default_region = 'us-east-1'
     default_visibility_timeout = 1800  # 30 minutes.
     default_wait_time_seconds = 0  # disabled see #198
+    default_s3_bucket = None 
+    default_s3_message_limit = 262144  # max sqs message size (256kb)
     domain_format = 'kombu%(vhost)s'
     _sdb = None
     _sqs = None
@@ -318,9 +322,30 @@ class Channel(virtual.Channel):
     def _put(self, queue, message, **kwargs):
         """Put message onto queue."""
         q = self._new_queue(queue)
-        m = Message()
-        m.set_body(dumps(message))
+        m = self._create_sqs_message_object(message)
         q.write(m)
+
+    def _create_sqs_message_object(self, message):
+        """Creates an SQS Message or BigMessage object.
+
+        This method validates the size of the incoming message text. If
+        SQS BigMessage support is enabled (an s3_bucket is supplied), then
+        we validate whether or not the supplied message text is large enough
+        to require this S3-backed BigMessage object or not.
+        """
+        message_body = dumps(message)
+        message_len = len(message_body)
+        message_too_big = message_len >= self.s3_message_limit
+
+        if self.s3_bucket and message_too_big:
+            message_body = StringIO(message_body)
+            message = BigMessage(s3_url=self.s3_bucket)
+        else:
+            message = Message()
+
+        message.set_body(message_body)
+
+        return message
 
     def _put_fanout(self, exchange, message, **kwargs):
         """Deliver fanout message to all queues in ``exchange``."""
@@ -521,12 +546,22 @@ class Channel(virtual.Channel):
         return self.transport_options.get('wait_time_seconds',
                                           self.default_wait_time_seconds)
 
+    @cached_property
+    def s3_bucket(self):
+        return self.transport_options.get('s3_bucket', None)
+
+    @cached_property
+    def s3_message_limit(self):
+        return self.transport_options.get('s3_message_limit',
+                                          self.default_s3_message_limit)
 
 class Transport(virtual.Transport):
     Channel = Channel
 
     polling_interval = 1
     wait_time_seconds = 0
+    s3_bucket = None
+    s3_message_limit = None
     default_port = None
     connection_errors = (
         virtual.Transport.connection_errors +
